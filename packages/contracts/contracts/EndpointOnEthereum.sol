@@ -5,10 +5,13 @@ pragma solidity ^0.8.0;
 import {Host,Result} from "@oasisprotocol/sapphire-contracts/contracts/OPL.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {WrappedROSE} from "./WrappedROSE.sol";
-import {IBridgeInterface} from "./IBridgeInterface.sol";
+import {eip2098} from "./eip2098.sol";
+import "./IBridgeInterface.sol";
 
 contract EndpointOnEthereum is Host {
+
     address private signerOnSapphire;
+
     WrappedROSE public token;
 
     constructor (address in_signer, address in_enclave)
@@ -21,34 +24,34 @@ contract EndpointOnEthereum is Host {
         token = new WrappedROSE();
     }
 
-    function burn( address in_receiver, uint in_amount ) external {
+    function burn( address receiver, uint amount ) external {
+
         require( msg.sender == address(token) );
-        require( in_amount > 0 );
 
-        bytes memory message = abi.encode(in_receiver, in_amount);
+        require( amount > 0 );
 
-        postMessage("withdraw()", message);
+        postMessage("withdraw()",
+            abi.encode(
+                WithdrawArgs({
+                    to: receiver,
+                    value: amount
+                    })));
     }
 
     /// Mint instruction received via CelerIM
-    function _mint(bytes calldata in_data)
+    function _mint(bytes calldata _data)
         internal
         returns (Result)
     {
-        bytes32 arg_r;
-        bytes32 arg_vs;
-        address arg_to;
-        uint arg_value;
+        MintArgs memory x = abi.decode(_data, (MintArgs));
 
-        (arg_r, arg_vs, arg_to, arg_value) = abi.decode(in_data, (bytes32,bytes32,address,uint));
+        bytes32 digest = hash_keccak256(x.wd);
 
-        bytes32 messageDigest = keccak256(abi.encodePacked(arg_to, arg_value));
+        address signer = ECDSA.recover(digest, x.sig[0], x.sig[1]);
 
-        address messageSigner = ECDSA.recover(messageDigest, arg_r, arg_vs);
+        require( signer == signerOnSapphire );
 
-        require( messageSigner == signerOnSapphire );
-
-        token.mint(arg_to, arg_value);
+        token.mint(x.wd.to, x.wd.value);
 
         return Result.Success;
     }

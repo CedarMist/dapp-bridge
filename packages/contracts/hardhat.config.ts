@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import "@nomicfoundation/hardhat-ignition-ethers";
 
 const TEST_HDWALLET = {
   mnemonic: "test test test test test test test test test test test junk",
