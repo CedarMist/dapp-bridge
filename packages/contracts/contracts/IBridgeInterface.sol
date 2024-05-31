@@ -2,20 +2,17 @@
 
 pragma solidity ^0.8.0;
 
-struct MintArgs {
-    bytes32[2] sig;
-    WithdrawArgs wd;
-}
+import { ExecutionStatus } from "./common/Endpoint.sol";
 
-struct WithdrawArgs {
+struct ReceiverAndValue {
     address to;
     uint value;
 }
 
-function hash_keccak256(WithdrawArgs memory x) pure returns (bytes32) {
-    return keccak256(abi.encode(x));
-}
+uint constant ReceiverAndValue_ABIEncodedLength = 64;
 
-interface IBridgeInterface {
-    function burn( address in_receiver, uint in_amount ) external;
+interface BridgeRemoteEndpointAPI {
+    function mint(ReceiverAndValue memory x) external returns (ExecutionStatus);
+
+    function burn(address receiver, uint amount) external;
 }

@@ -2,57 +2,82 @@
 
 pragma solidity ^0.8.0;
 
-import {Host,Result} from "@oasisprotocol/sapphire-contracts/contracts/OPL.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {WrappedROSE} from "./WrappedROSE.sol";
-import {eip2098} from "./eip2098.sol";
-import "./IBridgeInterface.sol";
+import { WrappedROSE } from "./WrappedROSE.sol";
+import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
+import { SpokeSUMReceiver_UniqueMessageSender, ExecutionStatus, Message } from "./common/SignedUniqueMessage.sol";
+import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedLength } from "./IBridgeInterface.sol";
 
-contract EndpointOnEthereum is Host {
-
-    address private signerOnSapphire;
-
+/**
+ * Spoke part of the bridge
+ *  - Receives signed 'mint' instructions from Sapphire
+ *  - Mints ERC20 (wROSE)
+ *  - Upon burning wROSE, sends 'withdraw' instructions to Sapphire
+ *  - Requires payment in native gas currency to burn
+ */
+contract EndpointOnEthereum is SpokeSUMReceiver_UniqueMessageSender, UsesCelerIM
+{
     WrappedROSE public token;
 
-    constructor (address in_signer, address in_enclave)
-        Host(in_enclave)
+    constructor (
+        ICelerMessageBus in_msgbus,
+        address in_remoteContract,
+        uint in_remoteChainId,
+        address in_remoteSigner
+    )
+        UsesCelerIM(in_msgbus)
+        SpokeSUMReceiver_UniqueMessageSender(in_remoteContract, in_remoteChainId, in_remoteSigner)
     {
-        signerOnSapphire = in_signer;
-
-        registerEndpoint("mint()", _mint);
-
         token = new WrappedROSE();
     }
 
-    function burn( address receiver, uint amount ) external {
-
-        require( msg.sender == address(token) );
-
-        require( amount > 0 );
-
-        postMessage("withdraw()",
-            abi.encode(
-                WithdrawArgs({
-                    to: receiver,
-                    value: amount
-                    })));
+    /// Cost (in native gas currency) to send a burn message
+    function burnCost()
+        public view
+        returns (uint)
+    {
+        return _transmissionCost(ReceiverAndValue_ABIEncodedLength);
     }
 
-    /// Mint instruction received via CelerIM
-    function _mint(bytes calldata _data)
-        internal
-        returns (Result)
+    function burn(uint value)
+        public
     {
-        MintArgs memory x = abi.decode(_data, (MintArgs));
+        return burn(value, msg.sender);
+    }
 
-        bytes32 digest = hash_keccak256(x.wd);
+    function burn(uint value, address receiver)
+        public payable
+    {
+        require( msg.sender == address(token) );
 
-        address signer = ECDSA.recover(digest, x.sig[0], x.sig[1]);
+        uint fee = _sendMessage(
+            BridgeRemoteEndpointAPI.burn.selector,
+            abi.encode(ReceiverAndValue(receiver, value)));
 
-        require( signer == signerOnSapphire );
+        // Refund any excess fee
+        if( msg.value > fee )
+        {
+            payable(msg.sender).transfer(msg.value - fee);
+        }
+    }
 
-        token.mint(x.wd.to, x.wd.value);
+    function _receiveMessage(Message memory message, address /*in_executor*/)
+        internal override
+        returns (ExecutionStatus)
+    {
+        if( message.selector == BridgeRemoteEndpointAPI.mint.selector )
+        {
+            return mint(abi.decode(message.data, (ReceiverAndValue)));
+        }
 
-        return Result.Success;
+        return ExecutionStatus.Fail;
+    }
+
+    function mint(ReceiverAndValue memory x)
+        internal
+        returns (ExecutionStatus)
+    {
+        token.mint(x.to, x.value);
+
+        return ExecutionStatus.Success;
     }
 }

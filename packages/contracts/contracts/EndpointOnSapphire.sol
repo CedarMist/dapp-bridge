@@ -2,58 +2,85 @@
 
 pragma solidity ^0.8.0;
 
-import {Enclave,Result} from "@oasisprotocol/sapphire-contracts/contracts/OPL.sol";
-import {MintArgs,WithdrawArgs} from "./IBridgeInterface.sol";
-import {EthereumUtils,SignatureRSV} from "@oasisprotocol/sapphire-contracts/contracts/EthereumUtils.sol";
-import {eip2098} from "./eip2098.sol";
+import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
+import { ReceiverAndValue, BridgeRemoteEndpointAPI, ReceiverAndValue_ABIEncodedLength } from "./IBridgeInterface.sol";
+import { SpokeSUMSender_UniqueMessageReceiver } from "./common/SignedUniqueMessage.sol";
+import { ExecutionStatus, MessageContext, MessageReceiver, Message } from "./common/Endpoint.sol";
+import { eip2098 } from "./lib/eip2098.sol";
 
-contract EndpointOnSapphire is Enclave {
-    bytes32 private signingSecret;
-    address public signingPublic;
-    uint private remoteBalance;
+contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
+{
+    uint public remoteBalance;
 
-    constructor (address in_host, bytes32 in_hostChain)
-        Enclave(in_host, in_hostChain)
+    constructor (
+        ICelerMessageBus in_msgbus,
+        address in_remoteContract,
+        uint in_remoteChainId
+    )
+        UsesCelerIM(in_msgbus)
+        SpokeSUMSender_UniqueMessageReceiver(in_remoteContract, in_remoteChainId)
+    { }
+
+    function depositCost()
+        public view
+        returns (uint)
     {
-        (signingPublic, signingSecret) = EthereumUtils.generateKeypair();
-
-        registerEndpoint("withdraw()", _withdraw);
+        return _transmissionCost(ReceiverAndValue_ABIEncodedLength);
     }
 
+    /**
+     * Receives native gas token, mints equivalent token on remote chain
+     *
+     * Subtracts message transmission cost from deposit amount
+     *
+     * @param to Address on remote chain to mint tokens for
+     */
     function deposit(address to)
         public payable
     {
-        WithdrawArgs memory wd = WithdrawArgs({to: to, value: msg.value});
+        uint fee = depositCost();
 
-        MintArgs memory ma = MintArgs({
-                    wd: wd,
-                    sig: eip2098(
-                        EthereumUtils.sign(
-                            signingPublic,
-                            signingSecret,
-                            keccak256(abi.encode(wd))))
-                    });
+        uint amount = msg.value - fee;
 
-        postMessage("mint()", abi.encode(ma));
+        _sendMessage(
+            BridgeRemoteEndpointAPI.mint.selector,
+            abi.encode(ReceiverAndValue(to, amount)),
+            fee);
 
-        remoteBalance += msg.value;
+        remoteBalance += amount;
     }
 
-    receive() external payable {
+    function deposit()
+        public payable
+    {
+        return deposit(msg.sender);
+    }
 
+    receive() external payable
+    {
         deposit(msg.sender);
     }
 
-    function _withdraw(bytes calldata in_data)
-        internal
-        returns (Result)
+    function _receiveMessage(Message memory message, address /*in_executor*/)
+        internal override
+        returns (ExecutionStatus)
     {
-        (WithdrawArgs memory x) = abi.decode(in_data, (WithdrawArgs));
+        if( message.selector == BridgeRemoteEndpointAPI.burn.selector )
+        {
+            return burn(abi.decode(message.data, (ReceiverAndValue)));
+        }
 
-        remoteBalance -= x.value;
+        return ExecutionStatus.Fail;
+    }
 
-        payable(x.to).transfer(x.value);
+    function burn(ReceiverAndValue memory in_arg)
+        internal
+        returns (ExecutionStatus)
+    {
+        remoteBalance -= in_arg.value;
 
-        return Result.Success;
+        payable(in_arg.to).transfer(in_arg.value);
+
+        return ExecutionStatus.Success;
     }
 }
