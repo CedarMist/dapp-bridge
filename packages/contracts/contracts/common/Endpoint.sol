@@ -33,7 +33,7 @@ abstract contract MessageReceiver {
 }
 
 abstract contract MessageEncoder {
-    function _encodeMessage(Message memory message)
+    function _encodeMessage(bytes4 in_selector, bytes memory in_data)
         internal virtual
         returns (bytes memory out_encoded);
 }
@@ -127,102 +127,4 @@ abstract contract Spoke is _Endpoint
     {
         return _Endpoint_send(_Spoke_transmissionContext(), in_message, in_fee);
     }
-}
-
-abstract contract _HomoEndpoint is _Endpoint
-{
-    function _HomoEndpoint_context(uint in_remoteChainId)
-        internal view
-        returns (MessageContext memory)
-    {
-        return MessageContext(address(this), in_remoteChainId, msg.sender);
-    }
-
-    function _Endpoint_receive(MessageContext memory in_ctx, bytes memory in_message)
-        internal override
-        returns (ExecutionStatus)
-    {
-        require( in_ctx.remoteContract == address(this) );
-
-        return _HomoEndpoint_receive(in_ctx.remoteChainId, in_ctx.localExecutor, in_message);
-    }
-
-    /// Implemented by inheriting contract
-    function _HomoEndpoint_receive(uint in_remoteChainId, address in_executor, bytes memory in_message)
-        internal virtual
-        returns (ExecutionStatus);
-}
-
-/// remoteContract is implicitly address(this)
-abstract contract HomoHub is _HomoEndpoint
-{
-    /// Implemented by inheriting contract
-    function _HomoHub_receive(uint in_remoteChainId, address in_executor, bytes memory in_message)
-        internal virtual
-        returns (ExecutionStatus);
-
-    function _HomoEndpoint_receive(uint in_remoteChainId, address in_executor, bytes memory in_message)
-        internal override
-        returns (ExecutionStatus)
-    {
-        return _HomoHub_receive(in_remoteChainId, in_executor, in_message);
-    }
-
-    function _HomoHub_transmissionCost(uint in_remoteChainId, uint in_messageLength)
-        internal view
-        returns (uint)
-    {
-        return _Endpoint_transmissionCost(_HomoEndpoint_context(in_remoteChainId), in_messageLength);
-    }
-
-    function _HomoHub_send(uint in_remoteChainId, bytes memory in_message, uint in_fee)
-        internal
-    {
-        return _Endpoint_send(_HomoEndpoint_context(in_remoteChainId), in_message, in_fee);
-    }
-
-    function _HomoHub_send(uint in_remoteChainId, bytes memory in_message)
-        internal
-    {
-        MessageContext memory ctx = _HomoEndpoint_context(in_remoteChainId);
-
-        return _Endpoint_send(ctx, in_message, _Endpoint_transmissionCost(ctx, in_message.length));
-    }
-}
-
-/// remoteContract is implicitly address(this)
-abstract contract HomoSpoke is _HomoEndpoint
-{
-    uint public immutable remoteChainId;
-
-    constructor (uint in_remoteChainId)
-    {
-        remoteChainId = in_remoteChainId;
-    }
-
-    function _HomoSpoke_send(bytes memory in_message)
-        internal
-    {
-        _Endpoint_send(_HomoEndpoint_context(remoteChainId), in_message);
-    }
-
-    function _HomoSpoke_transmissionCost(uint in_messageLength)
-        internal view
-        returns (uint)
-    {
-        return _Endpoint_transmissionCost(_HomoEndpoint_context(remoteChainId), in_messageLength);
-    }
-
-    function _HomoEndpoint_receive(uint in_remoteChainId, address in_executor, bytes memory in_message)
-        internal override
-        returns (ExecutionStatus)
-    {
-        require( in_remoteChainId == remoteChainId );
-
-        return _HomoSpoke_receive(in_executor, in_message);
-    }
-
-    function _HomoSpoke_receive(address in_executor, bytes memory in_message)
-        internal virtual
-        returns (ExecutionStatus);
 }

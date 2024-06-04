@@ -15,11 +15,26 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : TEST_H
 const config: HardhatUserConfig = {
   solidity: "0.8.24",
   networks: {
-    sapphire_local: {
+    'sapphire-localnet': {
       url: "http://localhost:8545",
       accounts: PRIVATE_KEY,
       chainId: 0x5afd,
-    }
+    },
+    'sapphire-localnet-proxy': {
+      url: "http://localhost:3001",
+      accounts: PRIVATE_KEY,
+      chainId: 0x5afd,
+    },
+    'sapphire-testnet': {
+      url: 'https://testnet.sapphire.oasis.io',
+      chainId: 0x5aff,
+      accounts: PRIVATE_KEY,
+    },
+    'sapphire-testnet-proxy': {
+      url: 'http://localhost:3001',
+      chainId: 0x5aff,
+      accounts: PRIVATE_KEY,
+    },
   }
 };
 

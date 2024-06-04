@@ -3,10 +3,10 @@
 pragma solidity ^0.8.0;
 
 import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
-import { ReceiverAndValue, BridgeRemoteEndpointAPI, ReceiverAndValue_ABIEncodedLength } from "./IBridgeInterface.sol";
+import { ReceiverAndValue, BridgeRemoteEndpointAPI,
+         ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
 import { SpokeSUMSender_UniqueMessageReceiver } from "./common/SignedUniqueMessage.sol";
 import { ExecutionStatus, MessageContext, MessageReceiver, Message } from "./common/Endpoint.sol";
-import { eip2098 } from "./lib/eip2098.sol";
 
 contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
 {
@@ -20,6 +20,24 @@ contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
         UsesCelerIM(in_msgbus)
         SpokeSUMSender_UniqueMessageReceiver(in_remoteContract, in_remoteChainId)
     { }
+
+    function ping(bytes32 x)
+        external payable
+    {
+        uint fee = _sendMessage(BridgeRemoteEndpointAPI.pong.selector, abi.encode(x));
+        if( msg.value > fee ) {
+            payable(msg.sender).transfer(msg.value - fee);
+        }
+    }
+
+    function pong(bytes32 x)
+        internal
+        returns (ExecutionStatus)
+    {
+        emit Pong(x);
+
+        return ExecutionStatus.Success;
+    }
 
     function depositCost()
         public view
@@ -68,6 +86,11 @@ contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
         if( message.selector == BridgeRemoteEndpointAPI.burn.selector )
         {
             return burn(abi.decode(message.data, (ReceiverAndValue)));
+        }
+
+        if( message.selector == BridgeRemoteEndpointAPI.pong.selector )
+        {
+            return pong(abi.decode(message.data, (bytes32)));
         }
 
         return ExecutionStatus.Fail;

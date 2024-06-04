@@ -9,14 +9,27 @@ interface ICelerMessageBus {
 
     function feePerByte() external view returns (uint256);
 
+    function calcFee(bytes calldata _message) external view returns (uint256);
+
     function sendMessage(
-        address _host,
-        uint256 _hostChainId,
-        bytes calldata _message
+        address in_remoteContract,
+        uint256 in_remoteChainId,
+        bytes calldata in_message
     ) external payable;
 }
 
-abstract contract UsesCelerIM is _Endpoint
+interface ICelerMessageReceiver {
+    function executeMessage(
+        address in_sender,
+        uint64 in_senderChainId,
+        bytes calldata in_message,
+        address in_executor
+    )
+        external payable
+        returns (uint256);
+}
+
+abstract contract UsesCelerIM is _Endpoint, ICelerMessageReceiver
 {
     ICelerMessageBus internal _celer_messageBus;
 

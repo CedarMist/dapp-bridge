@@ -5,7 +5,7 @@ pragma solidity ^0.8.0;
 import { WrappedROSE } from "./WrappedROSE.sol";
 import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
 import { SpokeSUMReceiver_UniqueMessageSender, ExecutionStatus, Message } from "./common/SignedUniqueMessage.sol";
-import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedLength } from "./IBridgeInterface.sol";
+import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
 
 /**
  * Spoke part of the bridge
@@ -38,6 +38,25 @@ contract EndpointOnEthereum is SpokeSUMReceiver_UniqueMessageSender, UsesCelerIM
         return _transmissionCost(ReceiverAndValue_ABIEncodedLength);
     }
 
+    function ping(bytes32 x)
+        external payable
+    {
+        uint fee = _sendMessage(BridgeRemoteEndpointAPI.pong.selector, abi.encode(x));
+
+        if( msg.value > fee ) {
+            payable(msg.sender).transfer(msg.value - fee);
+        }
+    }
+
+    function pong(bytes32 x)
+        internal
+        returns (ExecutionStatus)
+    {
+        emit Pong(x);
+
+        return ExecutionStatus.Success;
+    }
+
     function burn(uint value)
         public
     {
@@ -67,6 +86,11 @@ contract EndpointOnEthereum is SpokeSUMReceiver_UniqueMessageSender, UsesCelerIM
         if( message.selector == BridgeRemoteEndpointAPI.mint.selector )
         {
             return mint(abi.decode(message.data, (ReceiverAndValue)));
+        }
+
+        if( message.selector == BridgeRemoteEndpointAPI.pong.selector )
+        {
+            return pong(abi.decode(message.data, (bytes32)));
         }
 
         return ExecutionStatus.Fail;
