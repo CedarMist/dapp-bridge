@@ -3,7 +3,7 @@
 pragma solidity ^0.8.0;
 
 import { ICelerMessageBus, ICelerMessageReceiver } from "../common/CelerIM.sol";
-import { MessageContext, ExecutionStatus } from "../common/Endpoint.sol";
+import { MessageContext, ExecutionStatus, Spoke } from "../common/Endpoint.sol";
 import { UsesCelerIM } from "../common/CelerIM.sol";
 
 
@@ -100,6 +100,39 @@ contract MockPingPongUsingEndpoint is UsesCelerIM {
 
         require( in_ctx.remoteChainId == remoteChainId, "BAD remoteChainId" );
 
+        return pong(abi.decode(in_message, (bytes32)));
+    }
+}
+
+contract MockPingPongUsingSpoke is UsesCelerIM, Spoke {
+
+    constructor (
+        ICelerMessageBus in_messageBus,
+        address in_remoteContract,
+        uint256 in_remoteChainId
+    )
+        UsesCelerIM(in_messageBus)
+        Spoke(in_remoteContract, in_remoteChainId)
+    { }
+
+    function ping (bytes32 x) external payable {
+        uint fee = _Endpoint_send(
+            MessageContext(remoteContract, remoteChainId, msg.sender),
+            abi.encode(x));
+        if( msg.value > fee ) {
+            payable(msg.sender).transfer(msg.value-fee);
+        }
+    }
+
+    function pong (bytes32 x) internal returns (ExecutionStatus) {
+        emit Pong(x);
+        return ExecutionStatus.Success;
+    }
+
+    function _Spoke_receive(address, bytes memory in_message)
+        internal override
+        returns (ExecutionStatus)
+    {
         return pong(abi.decode(in_message, (bytes32)));
     }
 }

@@ -19,7 +19,7 @@ contract MockCelerMessageBus {
     struct Remapping {
         ICelerMessageReceiver remoteContract;
         uint64 remoteChainId;
-        address localContract;
+        ICelerMessageReceiver localContract;
     }
 
     struct SentMessage {
@@ -40,6 +40,15 @@ contract MockCelerMessageBus {
     uint public undeliveredCount;
 
     uint public deliveredCount;
+
+    constructor (Remapping[] memory in_remappings)
+    {
+        for( uint i = 0; i < in_remappings.length; i++ )
+        {
+            Remapping memory x = in_remappings[i];
+            addContract(x.remoteContract, x.remoteChainId, x.localContract);
+        }
+    }
 
     function _remappingHash(
         address in_remoteContract,
@@ -79,7 +88,7 @@ contract MockCelerMessageBus {
         localToRemote[in_localContract] = Remapping(
             in_remoteContract,
             in_remoteChainId,
-            address(in_localContract));
+            in_localContract);
     }
 
     // We choose some arbitrary but distinct amount for base & per-byte fees
