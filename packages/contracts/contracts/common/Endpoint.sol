@@ -15,51 +15,28 @@ struct MessageContext {
     address localExecutor;
 }
 
-struct Message {
-    bytes4 selector;
-    bytes data;
-}
-
-function predictEncodedMessageLength(uint in_messageDataLength)
-    pure returns (uint)
-{
-    return (in_messageDataLength - (in_messageDataLength%32)) + 160;
-}
-
-abstract contract MessageReceiver {
-    function _receiveMessage(Message memory message, address in_executor)
-        internal virtual
-        returns (ExecutionStatus);
-}
-
-abstract contract MessageEncoder {
-    function _encodeMessage(bytes4 in_selector, bytes memory in_data)
-        internal virtual
-        returns (bytes memory out_encoded);
-}
-
 abstract contract _Endpoint {
-    function _Endpoint_receive(MessageContext memory in_ctx, bytes memory in_message)
+    function _Endpoint_receive(MessageContext memory in_ctx, bytes memory in_data)
         internal virtual
         returns (ExecutionStatus);
 
     /// Implemented by underlying bridge
-    function _Endpoint_transmissionCost(MessageContext memory in_ctx, uint in_messageLength)
+    function _Endpoint_transmissionCost(MessageContext memory in_ctx, uint in_dataLength)
         internal view virtual
         returns (uint);
 
     /// Implemented by underlying bridge
-    function _Endpoint_send(MessageContext memory in_ctx, bytes memory in_message, uint in_fee)
+    function _Endpoint_send(MessageContext memory in_ctx, bytes memory in_data, uint in_fee)
         internal virtual;
 
     /// Auto-calculates cost before sending, return cost
-    function _Endpoint_send(MessageContext memory in_ctx, bytes memory in_message)
+    function _Endpoint_send(MessageContext memory in_ctx, bytes memory in_data)
         internal
         returns (uint)
     {
-        uint fee = _Endpoint_transmissionCost(in_ctx, in_message.length);
+        uint fee = _Endpoint_transmissionCost(in_ctx, in_data.length);
 
-        _Endpoint_send(in_ctx, in_message, fee);
+        _Endpoint_send(in_ctx, in_data, fee);
 
         return fee;
     }
@@ -84,19 +61,19 @@ abstract contract Spoke is _Endpoint
         remoteChainId = in_remoteChainId;
     }
 
-    function _Endpoint_receive(MessageContext memory ctx, bytes memory message)
+    function _Endpoint_receive(MessageContext memory in_ctx, bytes memory in_data)
         internal override
         returns (ExecutionStatus)
     {
-        require( ctx.remoteContract == remoteContract );
+        require( in_ctx.remoteContract == remoteContract );
 
-        require( ctx.remoteChainId == remoteChainId );
+        require( in_ctx.remoteChainId == remoteChainId );
 
-        return _Spoke_receive(ctx.localExecutor, message);
+        return _Spoke_receive(in_ctx.localExecutor, in_data);
     }
 
     /// Implemented by inheriting contract
-    function _Spoke_receive(address in_executor, bytes memory in_message)
+    function _Spoke_receive(address in_executor, bytes memory in_data)
         internal virtual
         returns (ExecutionStatus);
 
@@ -108,23 +85,23 @@ abstract contract Spoke is _Endpoint
     }
 
     /// Used by inheriting contract
-    function _Spoke_transmissionCost(uint in_messageLength)
+    function _Spoke_transmissionCost(uint in_dataLength)
         internal view
         returns (uint)
     {
-        return _Endpoint_transmissionCost(_Spoke_transmissionContext(), in_messageLength);
+        return _Endpoint_transmissionCost(_Spoke_transmissionContext(), in_dataLength);
     }
 
-    function _Spoke_send(bytes memory in_message)
+    function _Spoke_send(bytes memory in_data)
         internal
         returns (uint)
     {
-        return _Endpoint_send(_Spoke_transmissionContext(), in_message);
+        return _Endpoint_send(_Spoke_transmissionContext(), in_data);
     }
 
-    function _Spoke_send(bytes memory in_message, uint in_fee)
+    function _Spoke_send(bytes memory in_data, uint in_fee)
         internal
     {
-        return _Endpoint_send(_Spoke_transmissionContext(), in_message, in_fee);
+        return _Endpoint_send(_Spoke_transmissionContext(), in_data, in_fee);
     }
 }

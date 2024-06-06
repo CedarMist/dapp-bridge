@@ -31,7 +31,7 @@ interface ICelerMessageReceiver {
 
 abstract contract UsesCelerIM is _Endpoint, ICelerMessageReceiver
 {
-    ICelerMessageBus internal _celer_messageBus;
+    ICelerMessageBus public immutable _celer_messageBus;
 
     constructor (ICelerMessageBus in_msgbus)
     {
@@ -54,6 +54,8 @@ abstract contract UsesCelerIM is _Endpoint, ICelerMessageReceiver
     )
         internal override
     {
+        require( address(this).balance >= in_fee, "INSUFFICIENT BALANCE TO PAY FEE!" );
+
         _celer_messageBus.sendMessage{value: in_fee}(
             in_ctx.remoteContract,
             in_ctx.remoteChainId,

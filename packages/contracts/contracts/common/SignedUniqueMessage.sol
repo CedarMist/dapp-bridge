@@ -2,13 +2,15 @@
 
 pragma solidity ^0.8.0;
 
-import { ExecutionStatus, Spoke, MessageContext, MessageReceiver,
-         MessageEncoder, Message, predictEncodedMessageLength } from "./Endpoint.sol";
+import { ExecutionStatus, Spoke, MessageContext } from "./Endpoint.sol";
+import { IMessageReceiver, IMessageEncoder, IMessageDecoder, Message,
+         IMessageSender, predictEncodedMessageLength, encodedBytesLength,
+         decodeMessage, encodeMessage } from "./Message.sol";
 import { EthereumUtils, SignatureRSV } from "@oasisprotocol/sapphire-contracts/contracts/EthereumUtils.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { eip2098_encode } from "../lib/eip2098.sol";
 
-abstract contract SignedReceiver {
+abstract contract SignedDecoder {
 
     address public immutable remoteSigner;
 
@@ -16,23 +18,23 @@ abstract contract SignedReceiver {
         remoteSigner = in_remoteSigner;
     }
 
-    function _decodeSigned(bytes memory in_message)
+    function _decodeSigned(bytes memory in_data)
         internal view
-        returns (bytes memory)
+        returns (bytes memory out_data)
     {
-        (bytes32[2] memory sig, bytes memory envelope) = abi.decode(in_message, (bytes32[2], bytes));
+        bytes32[2] memory sig;
 
-        bytes32 digest = keccak256(envelope);
+        (sig, out_data) = abi.decode(in_data, (bytes32[2], bytes));
+
+        bytes32 digest = keccak256(out_data);
 
         address signer = ECDSA.recover(digest, sig[0], sig[1]);
 
         require( signer == remoteSigner, "signature verification failed" );
-
-        return envelope;
     }
 }
 
-abstract contract SignedSender {
+abstract contract SignedEncoder {
 
     bytes32 private immutable signingSecret;
 
@@ -59,7 +61,7 @@ abstract contract SignedSender {
         internal pure
         returns (uint)
     {
-        return (in_bytesLength - (in_bytesLength%32)) + 160;
+        return encodedBytesLength(in_bytesLength) + 64;
     }
 
     /// Prepend EIP-2098 encoded signature to bytes
@@ -72,7 +74,7 @@ abstract contract SignedSender {
 }
 
 /// Prefix all messages with a unique tag (message ID)
-abstract contract UniqueSender {
+abstract contract UniqueEncoder {
 
     bytes32 private messageId;
 
@@ -99,7 +101,7 @@ abstract contract UniqueSender {
         internal pure
         returns (uint)
     {
-        return (in_bytesLength - (in_bytesLength%32)) + 128;
+        return 32 + encodedBytesLength(in_bytesLength);
     }
 
     function _encodeUnique(bytes memory in_message)
@@ -118,7 +120,7 @@ abstract contract UniqueSender {
  * It is independent of any replay protection provided by the underlying
  *  message passing bridge.
  */
-abstract contract UniqueReceiver {
+abstract contract UniqueDecoder {
 
     mapping( bytes32 => bool ) public messageIds;
 
@@ -126,20 +128,20 @@ abstract contract UniqueReceiver {
         internal
         returns (bytes memory output)
     {
-        bytes32 mid;
+        bytes32 messageId;
 
-        (mid,output) = abi.decode(in_data, (bytes32,bytes));
+        (messageId, output) = abi.decode(in_data, (bytes32,bytes));
 
-        require( messageIds[mid] == false, "duplicate message" );
+        require( messageIds[messageId] == false, "duplicate message" );
 
-        messageIds[mid] = true;
+        messageIds[messageId] = true;
     }
 }
 
-abstract contract SignedUniqueDecoder is SignedReceiver, UniqueReceiver
+abstract contract SignedUniqueDecoder is SignedDecoder, UniqueDecoder
 {
     constructor (address in_remoteSigner)
-        SignedReceiver(in_remoteSigner)
+        SignedDecoder(in_remoteSigner)
     { }
 
     function _decodeSignedUnique(bytes memory in_data)
@@ -150,25 +152,11 @@ abstract contract SignedUniqueDecoder is SignedReceiver, UniqueReceiver
     }
 }
 
-abstract contract SignedUniqueMessageDecoder is SignedUniqueDecoder
-{
-    constructor (address in_remoteSigner)
-        SignedUniqueDecoder(in_remoteSigner)
-    { }
-
-    function _decodeSignedUniqueMessage(bytes memory in_data)
-        internal
-        returns (Message memory)
-    {
-        return abi.decode(_decodeSignedUnique(in_data), (Message));
-    }
-}
-
-abstract contract SignedUniqueEncoder is SignedSender, UniqueSender
+abstract contract SignedUniqueSender is SignedEncoder, UniqueEncoder
 {
     constructor ()
-        SignedSender()
-        UniqueSender()
+        SignedEncoder()
+        UniqueEncoder()
     { }
 
     function _predictSignedUniqueEncodedLength(uint in_bytesLength)
@@ -186,130 +174,70 @@ abstract contract SignedUniqueEncoder is SignedSender, UniqueSender
     }
 }
 
-abstract contract SignedUniqueMessageEncoder is SignedUniqueEncoder
-{
+abstract contract UniqueMessageDecoder is UniqueDecoder, IMessageDecoder {
     constructor ()
-        SignedUniqueEncoder()
+        UniqueDecoder()
     { }
 
-    function _predictSignedUniqueMessageEncodedLength(uint in_messageDataLength)
-        internal pure
+    function _decodeMessage(bytes memory in_data)
+        internal override
+        returns (Message memory)
+    {
+        return decodeMessage(_decodeUnique(in_data));
+    }
+}
+
+abstract contract UniqueMessageEncoder is UniqueEncoder, IMessageEncoder {
+    constructor ()
+    { }
+
+    function _encodedMessageLength(uint in_dataLength)
+        internal pure override
+        returns (uint)
+    {
+        return _predictUniqueEncodedLength(predictEncodedMessageLength(in_dataLength));
+    }
+
+    function _encodeMessage(bytes4 in_selector, bytes memory in_data)
+        internal override
+        returns (bytes memory out_encoded)
+    {
+        return _encodeUnique(encodeMessage(in_selector, in_data));
+    }
+}
+
+abstract contract SignedUniqueMessageDecoder is SignedUniqueDecoder, IMessageDecoder
+{
+    constructor (address in_remoteSigner)
+        SignedUniqueDecoder(in_remoteSigner)
+    { }
+
+    function _decodeMessage(bytes memory in_data)
+        internal override
+        returns (Message memory)
+    {
+        return decodeMessage(_decodeSignedUnique(in_data));
+    }
+}
+
+abstract contract SignedUniqueMessageEncoder is SignedUniqueSender, IMessageEncoder
+{
+    constructor ()
+        SignedUniqueSender()
+    { }
+
+    function _encodedMessageLength(uint in_messageDataLength)
+        internal pure override
         returns (uint)
     {
         return _predictSignedUniqueEncodedLength(
             predictEncodedMessageLength(in_messageDataLength));
     }
 
-    function _encodeSignedUniqueMessage(bytes4 in_selector, bytes memory in_data)
-        internal
-        returns (bytes memory)
-    {
-        return _encodeSignedUnique(abi.encode(Message(in_selector, in_data)));
-    }
-}
-
-abstract contract SpokeSUMSender is SignedUniqueMessageEncoder, Spoke
-{
-    constructor (
-        address in_remoteContract,
-        uint in_remoteChainId
-    )
-        SignedUniqueMessageEncoder()
-        Spoke(in_remoteContract, in_remoteChainId)
-    { }
-
-    function _transmissionCost(uint in_messageDataLength)
-        internal view
-        returns (uint)
-    {
-        return _Spoke_transmissionCost(
-            _predictSignedUniqueMessageEncodedLength(in_messageDataLength));
-    }
-
-    function _sendMessage(bytes4 in_selector, bytes memory in_data)
-        internal
-        returns (uint)
-    {
-        uint fee = _transmissionCost(in_data.length);
-
-        return _sendMessage(in_selector, in_data, fee);
-    }
-
-    function _sendMessage(bytes4 in_selector, bytes memory in_data, uint in_fee)
-        internal
-        returns (uint)
-    {
-        _Spoke_send(_encodeSignedUniqueMessage(in_selector, in_data), in_fee);
-
-        return in_fee;
-    }
-}
-
-abstract contract SpokeSUMReceiver is SignedUniqueMessageDecoder, Spoke, MessageReceiver {
-    constructor (
-        address in_remoteContract,
-        uint in_remoteChainId,
-        address in_remoteSigner
-    )
-        SignedUniqueMessageDecoder(in_remoteSigner)
-        Spoke(in_remoteContract, in_remoteChainId)
-    { }
-
-    function _Spoke_receive(address in_executor, bytes memory in_message)
-        internal override
-        returns (ExecutionStatus)
-    {
-        return _receiveMessage(_decodeSignedUniqueMessage(in_message), in_executor);
-    }
-}
-
-abstract contract SpokeSUMReceiver_UniqueMessageSender is SpokeSUMReceiver, UniqueSender, MessageEncoder {
-    constructor (
-        address in_remoteContract,
-        uint in_remoteChainId,
-        address in_remoteSigner
-    )
-        SpokeSUMReceiver(in_remoteContract, in_remoteChainId, in_remoteSigner)
-    { }
-
     function _encodeMessage(bytes4 in_selector, bytes memory in_data)
         internal override
         returns (bytes memory)
     {
-        return _encodeUnique(abi.encode(Message(in_selector, in_data)));
-    }
-
-    function _sendMessage(bytes4 in_selector, bytes memory in_data)
-        internal
-        returns (uint out_fee)
-    {
-        out_fee = _Spoke_send(_encodeMessage(in_selector, in_data));
-    }
-
-    function _transmissionCost(uint in_messageDataLength)
-        internal view
-        returns (uint)
-    {
-        return _Spoke_transmissionCost(
-            _predictUniqueEncodedLength(
-                predictEncodedMessageLength(in_messageDataLength)));
-    }
-}
-
-/// A poke that sends signed unique messages, receives unique messages
-abstract contract SpokeSUMSender_UniqueMessageReceiver is SpokeSUMSender, UniqueReceiver, MessageReceiver
-{
-    constructor (
-        address in_remoteContract,
-        uint in_remoteChainId
-    )
-        SpokeSUMSender(in_remoteContract, in_remoteChainId)
-    { }
-
-    function _Spoke_receive(address in_executor, bytes memory in_message)
-        internal override
-        returns (ExecutionStatus)
-    {
-        return _receiveMessage(abi.decode(in_message, (Message)), in_executor);
+        return _encodeSignedUnique(encodeMessage(in_selector, in_data));
     }
 }

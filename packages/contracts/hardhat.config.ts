@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import 'hardhat-tracer';
 import "./scripts/deploy";
 
 const TEST_HDWALLET = {
@@ -13,7 +14,9 @@ const TEST_HDWALLET = {
 const PRIVATE_KEY = process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : TEST_HDWALLET;
 
 const config: HardhatUserConfig = {
-  solidity: "0.8.24",
+  solidity: {
+    version: "0.8.24"
+  },
   networks: {
     'sapphire-localnet': {
       url: "http://localhost:8545",

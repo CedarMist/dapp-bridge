@@ -3,8 +3,10 @@
 pragma solidity ^0.8.0;
 
 import { WrappedROSE } from "./WrappedROSE.sol";
+import { SpokeMessenger, Message } from "./common/Message.sol";
+import { ExecutionStatus } from "./common/Endpoint.sol";
 import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
-import { SpokeSUMReceiver_UniqueMessageSender, ExecutionStatus, Message } from "./common/SignedUniqueMessage.sol";
+import { UniqueMessageEncoder, SignedUniqueMessageDecoder } from "./common/SignedUniqueMessage.sol";
 import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
 
 /**
@@ -14,7 +16,7 @@ import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedL
  *  - Upon burning wROSE, sends 'withdraw' instructions to Sapphire
  *  - Requires payment in native gas currency to burn
  */
-contract EndpointOnEthereum is SpokeSUMReceiver_UniqueMessageSender, UsesCelerIM
+contract EndpointOnEthereum is UniqueMessageEncoder, SignedUniqueMessageDecoder, SpokeMessenger, UsesCelerIM
 {
     WrappedROSE public token;
 
@@ -25,7 +27,8 @@ contract EndpointOnEthereum is SpokeSUMReceiver_UniqueMessageSender, UsesCelerIM
         address in_remoteSigner
     )
         UsesCelerIM(in_msgbus)
-        SpokeSUMReceiver_UniqueMessageSender(in_remoteContract, in_remoteChainId, in_remoteSigner)
+        SpokeMessenger(in_remoteContract, in_remoteChainId)
+        SignedUniqueMessageDecoder(in_remoteSigner)
     {
         token = new WrappedROSE();
     }

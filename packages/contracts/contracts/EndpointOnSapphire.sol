@@ -5,10 +5,11 @@ pragma solidity ^0.8.0;
 import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
 import { ReceiverAndValue, BridgeRemoteEndpointAPI,
          ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
-import { SpokeSUMSender_UniqueMessageReceiver } from "./common/SignedUniqueMessage.sol";
-import { ExecutionStatus, MessageContext, MessageReceiver, Message } from "./common/Endpoint.sol";
+import { SignedUniqueMessageEncoder, UniqueMessageDecoder } from "./common/SignedUniqueMessage.sol";
+import { ExecutionStatus, MessageContext } from "./common/Endpoint.sol";
+import { Message, SpokeMessenger } from "./common/Message.sol";
 
-contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
+contract EndpointOnSapphire is UsesCelerIM, SpokeMessenger, SignedUniqueMessageEncoder, UniqueMessageDecoder
 {
     uint public remoteBalance;
 
@@ -18,7 +19,7 @@ contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
         uint in_remoteChainId
     )
         UsesCelerIM(in_msgbus)
-        SpokeSUMSender_UniqueMessageReceiver(in_remoteContract, in_remoteChainId)
+        SpokeMessenger(in_remoteContract, in_remoteChainId)
     { }
 
     function ping(bytes32 x)
@@ -49,7 +50,7 @@ contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
     /**
      * Receives native gas token, mints equivalent token on remote chain
      *
-     * Subtracts message transmission cost from deposit amount
+     * Subtracts message transmission cost from deposit amount.
      *
      * @param to Address on remote chain to mint tokens for
      */
@@ -57,6 +58,8 @@ contract EndpointOnSapphire is UsesCelerIM, SpokeSUMSender_UniqueMessageReceiver
         public payable
     {
         uint fee = depositCost();
+
+        require( msg.value > fee, "NO DEPOSIT AFTER FEE!" );
 
         uint amount = msg.value - fee;
 
