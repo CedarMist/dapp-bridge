@@ -1,6 +1,6 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
-import { EndpointOnEthereum, EndpointOnSapphire, MockCelerMessageBus } from "../typechain-types";
+import { EndpointOnEthereum, EndpointOnSapphire, MockCelerMessageBus, WrappedROSE } from "../typechain-types";
 import { EventFragment, getCreateAddress, hexlify, parseEther } from "ethers"
 import { randomBytes } from "crypto";
 
@@ -12,6 +12,7 @@ describe('End to end', () => {
     let eos: EndpointOnSapphire;
     let eoe: EndpointOnEthereum;
     let pongFragment: EventFragment;
+    let wROSE: WrappedROSE;
 
     before(async () => {
         const [owner] = await ethers.getSigners();
@@ -41,6 +42,8 @@ describe('End to end', () => {
         eoe = await eoeFactory.deploy(mockmb.getAddress(), eosAddress, SAPPHIRE_LOCALNET_CHAINID, eosSigner);
         await eoe.waitForDeployment();
         expect(await eoe.getAddress()).equal(eoeAddress);
+
+        wROSE = await ethers.getContractAt('WrappedROSE', await eoe.token());
 
         // Verify Ethereum endpoint has correct signer from Sapphire endpoint
         expect(await eoe.remoteSigner()).equal(eosSigner);
@@ -75,7 +78,7 @@ describe('End to end', () => {
         }
         expect(foundPongEvent).equal(true);
 
-        // Verify messages have been delivered
+        // Verify message have been delivered
         expect(await mockmb.undeliveredCount()).equal(udcBefore);
         expect(await mockmb.deliveredCount()).equal(dcBefore + 1n);
     });
@@ -110,5 +113,35 @@ describe('End to end', () => {
         // Verify messages have been delivered
         expect(await mockmb.undeliveredCount()).equal(udcBefore);
         expect(await mockmb.deliveredCount()).equal(dcBefore + 1n);
+    });
+
+    it('Mint & Burn', async () => {
+        const dcBefore = await mockmb.deliveredCount();
+        const udcBefore = await mockmb.undeliveredCount();
+
+        const [owner] = await ethers.getSigners();
+
+        // Deposit cost is subtracted from amount sent to contract
+        // Provide the cost in addition to the amount
+        const eosDepositAmount = parseEther('1');
+        const eosDepositCost = await eos.depositCost();
+
+        const eosDepositTx = await eos["deposit()"]({value: eosDepositCost + eosDepositAmount});
+        await eosDepositTx.wait();
+
+        // Verify an undelivered message is pending
+        expect(await mockmb.undeliveredCount()).equal(udcBefore + 1n);
+        expect(await mockmb.deliveredCount()).equal(dcBefore);
+
+        // Deliver a single message
+        const eoeDepositDeliveryTx = await mockmb.deliverOneMessage();
+        await eoeDepositDeliveryTx.wait();
+
+        // Verify message have been delivered
+        expect(await mockmb.undeliveredCount()).equal(udcBefore);
+        expect(await mockmb.deliveredCount()).equal(dcBefore + 1n);
+
+        // Verify 1 wROSE has been minted
+        expect(await wROSE.balanceOf(owner.address)).equal(eosDepositAmount);
     });
 });
