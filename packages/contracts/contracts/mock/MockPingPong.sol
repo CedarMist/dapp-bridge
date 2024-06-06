@@ -170,8 +170,6 @@ contract MockPingPongUsingSpoke is UsesCelerIM, Spoke {
     }
 }
 
-import { console } from "hardhat/console.sol" ;
-
 abstract contract MockPingPongUsingSpokeMessenger is UsesCelerIM, SpokeMessenger {
 
     bytes4 constant PING_SELECTOR = 0x01020304;

@@ -7,7 +7,8 @@ import { SpokeMessenger, Message } from "./common/Message.sol";
 import { ExecutionStatus } from "./common/Endpoint.sol";
 import { UsesCelerIM, ICelerMessageBus } from "./common/CelerIM.sol" ;
 import { UniqueMessageEncoder, SignedUniqueMessageDecoder } from "./common/SignedUniqueMessage.sol";
-import { BridgeRemoteEndpointAPI, ReceiverAndValue, ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
+import { BridgeRemoteEndpointAPI, ReceiverAndValue,
+         ReceiverAndValue_ABIEncodedLength, Pong } from "./IBridgeInterface.sol";
 
 /**
  * Spoke part of the bridge
@@ -46,6 +47,7 @@ contract EndpointOnEthereum is UniqueMessageEncoder, SignedUniqueMessageDecoder,
     {
         uint fee = _sendMessage(BridgeRemoteEndpointAPI.pong.selector, abi.encode(x));
 
+        // Refund any excess fee to sender
         if( msg.value > fee ) {
             payable(msg.sender).transfer(msg.value - fee);
         }

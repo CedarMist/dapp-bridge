@@ -43,6 +43,10 @@ function decodeMessage(bytes memory in_data)
     return abi.decode(in_data, (Message));
 }
 
+/**
+ * Predict the `abi.encode()` size of an encoded `Message` struct
+ * @param in_dataLength Message.data.length
+ */
 function predictEncodedMessageLength(uint in_dataLength)
     pure returns (uint)
 {
@@ -117,8 +121,6 @@ abstract contract SpokeMessenger is Spoke, IMessageEncoder, IMessageDecoder, IMe
         internal override
         returns (ExecutionStatus)
     {
-        Message memory message = _decodeMessage(in_data);
-
-        return _receiveMessage(message, in_executor);
+        return _receiveMessage(_decodeMessage(in_data), in_executor);
     }
 }

@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
 import { EndpointOnEthereum, EndpointOnSapphire, MockCelerMessageBus } from "../typechain-types";
-import { getCreateAddress, parseEther } from "ethers"
+import { EventFragment, getCreateAddress, hexlify, parseEther } from "ethers"
 import { randomBytes } from "crypto";
 
 const SAPPHIRE_LOCALNET_CHAINID = 0x5afd;
@@ -11,26 +11,29 @@ describe('End to end', () => {
     let mockmb: MockCelerMessageBus;
     let eos: EndpointOnSapphire;
     let eoe: EndpointOnEthereum;
+    let pongFragment: EventFragment;
 
     before(async () => {
         const [owner] = await ethers.getSigners();
 
-        const mockmbfactory = await ethers.getContractFactory('MockCelerMessageBus');
-        mockmb = await mockmbfactory.deploy();
-        await mockmb.waitForDeployment()
-
         // Predict deployment addresses of both endpoints
-        const eosNonce = await ethers.provider.getTransactionCount(owner);
+        const eosNonce = await ethers.provider.getTransactionCount(owner) + 1;
         const eosAddress = getCreateAddress({from: owner.address, nonce: eosNonce});
         const eoeNonce = eosNonce + 1;
         const eoeAddress = getCreateAddress({from: owner.address, nonce: eoeNonce});
+
+        const mockmbfactory = await ethers.getContractFactory('MockCelerMessageBus');
+        mockmb = await mockmbfactory.deploy([
+            {remoteContract: eosAddress, remoteChainId: SAPPHIRE_LOCALNET_CHAINID, localContract: eosAddress},
+            {remoteContract: eoeAddress, remoteChainId: ETHEREUM_CHAINID, localContract: eoeAddress},
+        ]);
+        await mockmb.waitForDeployment()
 
         // Deploy sapphire endpoint first
         const eosFactory = await ethers.getContractFactory('EndpointOnSapphire');
         eos = await eosFactory.deploy(mockmb.getAddress(), eoeAddress, ETHEREUM_CHAINID);
         await eos.waitForDeployment();
         expect(await eos.getAddress()).equal(eosAddress);
-
         const eosSigner = await eos.signingPublic();
 
         // Then ethereum endpoint
@@ -39,31 +42,73 @@ describe('End to end', () => {
         await eoe.waitForDeployment();
         expect(await eoe.getAddress()).equal(eoeAddress);
 
+        // Verify Ethereum endpoint has correct signer from Sapphire endpoint
         expect(await eoe.remoteSigner()).equal(eosSigner);
 
-        // Then add the contract mappings via the Mock MessageBus so they can talk to each other
-        await mockmb["addContract(address,uint64)"](eosAddress, SAPPHIRE_LOCALNET_CHAINID);
-        await mockmb["addContract(address,uint64)"](eoeAddress, ETHEREUM_CHAINID);
+        pongFragment = eoe.interface.getEvent("Pong");
     });
 
-    it('Ping Pong', async () => {
-        console.log('Delivered count', await mockmb.deliveredCount());
-        console.log('Undelivered count', await mockmb.undeliveredCount());
+    it('Ping Sapphire to Ethereum', async () => {
+        const dcBefore = await mockmb.deliveredCount();
+        const udcBefore = await mockmb.undeliveredCount();
 
-        console.log('Sending ping');
+        // Send a ping() event from Sapphire to Ethereum
         const eosPingRand = randomBytes(32);
         const eosPing = await eos.ping(eosPingRand, {value: parseEther('1')})
-        const eosPingReceipt = await eosPing.wait();
-        console.log(eosPingReceipt);
+        await eosPing.wait();
 
-        console.log('Undelivered count', await mockmb.undeliveredCount());
-        console.log('Delivering ping')
+        // Verify an undelivered message is pending
+        expect(await mockmb.undeliveredCount()).equal(udcBefore + 1n);
+        expect(await mockmb.deliveredCount()).equal(dcBefore);
 
+        // Deliver a single message
         const eosPingDelivery = await mockmb.deliverOneMessage();
-        const eosPingDeliveryReceipt = eosPingDelivery.wait();
-        console.log(eosPingDeliveryReceipt);
+        const eosPingDeliveryReceipt = await eosPingDelivery.wait();
 
-        console.log('Delivered count', await mockmb.deliveredCount());
-        console.log('Undelivered count', await mockmb.undeliveredCount());
+        // Verify delivery emitted pong event with correct randomness
+        let foundPongEvent = false;
+        for( const l of eosPingDeliveryReceipt!.logs ) {
+            if( l.topics.includes(pongFragment.topicHash) ) {
+                foundPongEvent = true;
+                expect(l.data).equal(hexlify(eosPingRand));
+            }
+        }
+        expect(foundPongEvent).equal(true);
+
+        // Verify messages have been delivered
+        expect(await mockmb.undeliveredCount()).equal(udcBefore);
+        expect(await mockmb.deliveredCount()).equal(dcBefore + 1n);
+    });
+
+    it('Ping Ethereum to Sapphire', async () => {
+        const dcBefore = await mockmb.deliveredCount();
+        const udcBefore = await mockmb.undeliveredCount();
+
+        // Send a ping() event from Sapphire to Ethereum
+        const eoePingRand = randomBytes(32);
+        const eoePing = await eoe.ping(eoePingRand, {value: parseEther('1')})
+        await eoePing.wait();
+
+        // Verify an undelivered message is pending
+        expect(await mockmb.undeliveredCount()).equal(udcBefore + 1n);
+        expect(await mockmb.deliveredCount()).equal(dcBefore);
+
+        // Deliver a single message
+        const eoePingDelivery = await mockmb.deliverOneMessage();
+        const eoePingDeliveryReceipt = await eoePingDelivery.wait();
+
+        // Verify delivery emitted pong event with correct randomness
+        let foundPongEvent = false;
+        for( const l of eoePingDeliveryReceipt!.logs ) {
+            if( l.topics.includes(pongFragment.topicHash) ) {
+                foundPongEvent = true;
+                expect(l.data).equal(hexlify(eoePingRand));
+            }
+        }
+        expect(foundPongEvent).equal(true);
+
+        // Verify messages have been delivered
+        expect(await mockmb.undeliveredCount()).equal(udcBefore);
+        expect(await mockmb.deliveredCount()).equal(dcBefore + 1n);
     });
 });
